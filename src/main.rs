@@ -13,6 +13,7 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::fs::OpenOptions;
 use std::fs::File;
+use std::thread;
 
 static LICENSE: &'static str = "/**
  * Copyright (C) 2015 Deepin Technology Co., Ltd.
@@ -33,6 +34,7 @@ fn process_file(file: &Path) {
 
     println!("process {:?}", file);
 
+
     // read old data
     let mut fp = File::open(file).unwrap();
     let mut buf = String::new();
@@ -41,10 +43,12 @@ fn process_file(file: &Path) {
     // truncate file
     let mut fp = OpenOptions::new().write(true).truncate(true).open(file).unwrap();
 
-    // write new data
-    fp.write_all(LICENSE.as_bytes()).unwrap();
-    fp.write_all(&buf.into_bytes()).unwrap();
-    fp.sync_data();
+    thread::spawn(move || {
+        // write new data
+        fp.write_all(LICENSE.as_bytes()).unwrap();
+        fp.write_all(&buf.into_bytes()).unwrap();
+        fp.sync_data();
+    });
 }
 
 fn main() {
