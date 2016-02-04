@@ -1,5 +1,5 @@
 [package]
-name = "license_manage"
+name = "license_manager"
 version = "0.1.0"
 authors = ["石博文 <sbw@sbw.so>"]
 
