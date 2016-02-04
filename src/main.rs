@@ -1,4 +1,7 @@
 
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 extern crate clap;
 extern crate walkdir;
 
@@ -34,7 +37,7 @@ impl Manager {
             return;
         }
 
-        println!("process {:?}", file);
+        info!("process {:?}", file);
 
         // read old data
         let mut fp = File::open(file).unwrap();
@@ -77,6 +80,8 @@ impl Manager {
 
 fn main() {
 
+    let _ = env_logger::init();
+
     let args = App::new("license_manage")
                     .version("0.0.1")
                     .author("sbwtw <sbw@sbw.so>")
@@ -96,6 +101,7 @@ fn main() {
         Some(value) => value,
         _ => ".",
     };
+    trace!("search path = {}", search_path);
 
     let mut manager = Manager::new();
 
