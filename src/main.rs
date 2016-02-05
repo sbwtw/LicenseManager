@@ -10,6 +10,7 @@ use clap::App;
 
 use walkdir::WalkDir;
 
+use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::fs::OpenOptions;
@@ -76,13 +77,21 @@ impl Manager {
     fn set_license(&mut self, license: &str) {
         self.license = Arc::new(String::from(license));
     }
+
+    fn load_license(&mut self, path: &str) {
+
+    }
+
+    fn license(&self) -> &str {
+        self.license.as_ref()
+    }
 }
 
 fn main() {
 
     let _ = env_logger::init();
 
-    let args = App::new("license_manage")
+    let args = App::new("license_manager")
                     .version("0.0.1")
                     .author("sbwtw <sbw@sbw.so>")
                     .arg(Arg::with_name("path")
@@ -93,25 +102,40 @@ fn main() {
                     .arg(Arg::with_name("license")
                          .short("l")
                          .long("license")
-                         .help("specification a license file")
+                         .help("specification a license file path")
                          .takes_value(true))
+                    .arg(Arg::with_name("remove")
+                         .short("r")
+                         .long("remove_exists")
+                         .help("remove exists license"))
                     .get_matches();
-
-    let search_path = match args.value_of("path") {
-        Some(value) => value,
-        _ => ".",
-    };
-    trace!("search path = {}", search_path);
 
     let mut manager = Manager::new();
 
-    manager.set_license("/**
- * Copyright (C) 2015 Deepin Technology Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 3 of the License, or
- * (at your option) any later version.
- **/\n\n");
+    // load license from file or stdin
+    match args.value_of("license") {
+        Some(path) => manager.load_license(path),
+        _ => {
+            let mut input = String::new();
+            match io::stdin().read_to_string(&mut input) {
+                Ok(_) => manager.set_license(&input),
+                _ => return,
+            }
+        },
+    };
+    let search_path = args.value_of("path").unwrap_or(".");
+
+    trace!("search path = {}", search_path);
+    trace!("license content: \n{}", manager.license());
+
     manager.process(search_path);
+
+    //manager.set_license("/**
+ //* Copyright (C) 2015 Deepin Technology Co., Ltd.
+ //*
+ //* This program is free software; you can redistribute it and/or modify
+ //* it under the terms of the GNU General Public License as published by
+ //* the Free Software Foundation; either version 3 of the License, or
+ //* (at your option) any later version.
+ //**/\n\n");
 }
