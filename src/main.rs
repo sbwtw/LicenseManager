@@ -79,7 +79,7 @@ impl Manager {
     }
 
     fn load_license(&mut self, path: &str) {
-
+        debug!("load license file from {}", path);
     }
 
     fn license(&self) -> &str {
