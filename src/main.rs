@@ -197,7 +197,7 @@ fn main() {
  * (at your option) any later version.
  **/
 
- "#;
+"#;
 
     let p = Processor::new().license(license);
 
