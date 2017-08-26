@@ -1,141 +1,208 @@
 
-#[macro_use]
-extern crate log;
-extern crate env_logger;
 extern crate clap;
-extern crate walkdir;
 
-use clap::Arg;
-use clap::App;
+use clap::{App, Arg};
 
-use walkdir::WalkDir;
-
-use std::io;
 use std::io::prelude::*;
-use std::path::Path;
-use std::fs::OpenOptions;
-use std::fs::File;
-use std::thread;
-use std::sync::Arc;
+use std::io::{BufRead, BufReader};
+use std::fs;
+use std::fs::{File, ReadDir, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::iter::Iterator;
 
-struct Manager {
-    license: Arc<String>,
+struct Filter {
+    base_dir: String,
+    entry_iter: Option<ReadDir>,
+    search_dirs: Vec<String>,
+    ignore_dirs: Vec<String>,
+    match_exts: Vec<String>,
 }
 
-impl Manager {
+impl Filter {
+    pub fn new(path: &str) -> Filter {
+        let f = Filter {
+            base_dir: path.to_owned(),
+            entry_iter: None,
+            search_dirs: vec![path.to_owned()],
+            ignore_dirs: vec![],
+            match_exts: vec![],
+        };
 
-    fn new() -> Manager {
-        Manager {
-            license: Arc::new(String::new()),
-        }
+        f
     }
 
-    fn process_file(&self, file: &Path) {
+    pub fn ignore(mut self, paths: &Vec<&str>) -> Self {
 
-        let file_name = file.to_string_lossy();
+        for p in paths {
+            self.ignore_dirs.push((*p).to_owned());
+        }
 
-        if !file_name.ends_with(".h") && !file_name.ends_with(".cpp") {
+        self
+    }
+
+    pub fn extension(mut self, extensions: &Vec<&str>) -> Self {
+
+        for e in extensions {
+            self.match_exts.push((*e).to_owned());
+        }
+
+        self
+    }
+}
+
+impl Iterator for Filter {
+    type Item = PathBuf;
+
+    fn next(&mut self) -> Option<Self::Item> {
+
+        let base_len = self.base_dir.len() + 1;
+
+        loop {
+            if let Some(ref mut iter) = self.entry_iter {
+                while let Some(r) = iter.next() {
+                    let entry = r.unwrap();
+                    let path = entry.path();
+                    let metadata = entry.metadata().unwrap();
+
+                    if metadata.is_file() {
+                        if let Some(ext) = path.extension() {
+                            if !self.match_exts.contains(
+                                &ext.to_string_lossy().into_owned(),
+                            )
+                            {
+                                continue;
+                            }
+                        } else {
+                            continue;
+                        }
+
+                        return Some(path);
+                    } else if metadata.is_dir() {
+
+                        let p = path.to_str().unwrap();
+                        let tail = p.get(base_len..).unwrap();
+                        if !self.ignore_dirs.contains(&tail.to_owned()) {
+                            self.search_dirs.push(p.to_owned());
+                        }
+                    }
+                }
+            }
+
+            if !self.search_dirs.is_empty() {
+                let d = self.search_dirs.pop();
+
+                if d.is_none() {
+                    break;
+                }
+
+                self.entry_iter = Some(fs::read_dir(d.unwrap()).unwrap());
+            } else {
+                break;
+            }
+        }
+
+        return None;
+    }
+}
+
+struct Processor {
+    license_text: String,
+}
+
+impl Processor {
+    pub fn new() -> Processor {
+        Processor { license_text: String::new() }
+    }
+
+    pub fn license(mut self, license: &str) -> Self {
+        self.license_text = license.to_owned();
+        self
+    }
+
+    pub fn has_license(&self, file: &str) -> bool {
+        let f = File::open(file).unwrap();
+        let rdr = BufReader::new(f);
+
+        let mut scaned_lines = 0;
+        for line in rdr.lines() {
+            let l = line.unwrap();
+            if l.contains("Copyright") {
+                return true;
+            }
+
+            scaned_lines += 1;
+
+            if scaned_lines > 5 {
+                break;
+            }
+        }
+
+        false
+    }
+
+    pub fn process(&self, file: &str) {
+        if self.has_license(file) {
             return;
         }
 
-        info!("process {:?}", file);
+        println!("process: {}", file);
 
-        // read old data
-        let mut fp = File::open(file).unwrap();
         let mut buf = String::new();
-        let _ = fp.read_to_string(&mut buf);
+        let mut f = File::open(file).unwrap();
+        let _ = f.read_to_string(&mut buf);
 
-        // truncate file
-        let mut fp = OpenOptions::new().write(true).truncate(true).open(file).unwrap();
+        let mut f = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(file)
+            .unwrap();
 
-        let license = self.license.clone();
-        thread::spawn(move || {
-            // write new data
-            fp.write_all(license.as_bytes()).unwrap();
-            fp.write_all(&buf.into_bytes()).unwrap();
-            let _ = fp.sync_data();
-        });
-    }
-
-    fn process(&self, path: &str) {
-
-        for entry in WalkDir::new(path) {
-
-            if entry.is_err() {
-                continue;
-            }
-
-            let entry = entry.unwrap();
-            let file_type = entry.file_type();
-
-            if file_type.is_file() {
-                self.process_file(entry.path());
-            }
-        }
-    }
-
-    fn set_license(&mut self, license: &str) {
-        self.license = Arc::new(String::from(license));
-    }
-
-    fn load_license(&mut self, path: &str) {
-        debug!("load license file from {}", path);
-    }
-
-    fn license(&self) -> &str {
-        self.license.as_ref()
+        f.write_all(self.license_text.as_bytes()).unwrap();
+        f.write_all(buf.as_bytes()).unwrap();
     }
 }
 
 fn main() {
 
-    let _ = env_logger::init();
+    let matches = App::new("license manager")
+        .version("0.1")
+        .about("license manager")
+        .arg(
+            Arg::with_name("path")
+                .short("p")
+                .long("path")
+                .help("specificed working directory")
+                .required(true)
+                .takes_value(true),
+        )
+        .get_matches();
 
-    let args = App::new("license_manager")
-                    .version("0.0.1")
-                    .author("sbwtw <sbw@sbw.so>")
-                    .arg(Arg::with_name("path")
-                         .short("p")
-                         .long("path")
-                         .help("search path")
-                         .takes_value(true))
-                    .arg(Arg::with_name("license")
-                         .short("l")
-                         .long("license")
-                         .help("specification a license file path")
-                         .takes_value(true))
-                    .arg(Arg::with_name("remove")
-                         .short("r")
-                         .long("remove_exists")
-                         .help("remove exists license"))
-                    .get_matches();
+    let path = matches.value_of("path").unwrap();
+    let path = Path::new(path).canonicalize().unwrap();
+    let path = path.to_str().unwrap();
 
-    let mut manager = Manager::new();
+    let mut f = Filter::new(path).ignore(&vec![".git", "build"]).extension(
+        &vec![
+            "cpp",
+            "h",
+        ],
+    );
 
-    // load license from file or stdin
-    match args.value_of("license") {
-        Some(path) => manager.load_license(path),
-        _ => {
-            let mut input = String::new();
-            match io::stdin().read_to_string(&mut input) {
-                Ok(_) => manager.set_license(&input),
-                _ => return,
-            }
-        },
-    };
-    let search_path = args.value_of("path").unwrap_or(".");
+    let license = r#"/**
+ * Copyright (C) 2017 Deepin Technology Co., Ltd.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ **/
 
-    trace!("search path = {}", search_path);
-    trace!("license content: \n{}", manager.license());
+ "#;
 
-    manager.process(search_path);
+    let p = Processor::new().license(license);
 
-    //manager.set_license("/**
- //* Copyright (C) 2015 Deepin Technology Co., Ltd.
- //*
- //* This program is free software; you can redistribute it and/or modify
- //* it under the terms of the GNU General Public License as published by
- //* the Free Software Foundation; either version 3 of the License, or
- //* (at your option) any later version.
- //**/\n\n");
+    while let Some(f) = f.next() {
+        let file = f.to_str().unwrap();
+        p.process(file);
+    }
 }

@@ -5,6 +5,3 @@ authors = ["石博文 <sbw@sbw.so>"]
 
 [dependencies]
 clap = "*"
-walkdir = "*"
-log = "*"
-env_logger = "*"
